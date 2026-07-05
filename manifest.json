@@ -1,0 +1,17 @@
+{
+  "name": "Olprog Manager",
+  "short_name": "Olprog",
+  "description": "Трекер задач и решений по программированию",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#6c5ce7",
+  "background_color": "#0f1117",
+  "icons": [
+    {
+      "src": "/icons/iconk.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
