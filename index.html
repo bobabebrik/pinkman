@@ -1608,9 +1608,228 @@
 
 <script>
 // ==================== SUPABASE КОНФИГУРАЦИЯ ====================
-const SUPABASE_URL = 'https://zygatqqosaxrfzopuiai.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_FcEgEUymrx489dTl3lQXeA_zRTiE8zt';
-// ==================== КЭШИРОВАНИЕ ФОТО ====================
+let SUPABASE_URL = '';
+let SUPABASE_ANON_KEY = '';
+let TELEGRAM_BOT_TOKEN = '';
+let TELEGRAM_CHAT_ID = '';
+
+  // ==================== СИСТЕМА ХРАНЕНИЯ КЛЮЧЕЙ ====================
+const KEY_STORE_NAME = 'olprog_keys';
+const KEY_STORE_VERSION = 1;
+
+// Функция для сохранения ключей в IndexedDB
+function saveKeysToDB(supabaseUrl, supabaseKey, botToken, chatId) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(KEY_STORE_NAME, KEY_STORE_VERSION);
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('keys')) {
+        db.createObjectStore('keys', { keyPath: 'id' });
+      }
+    };
+    
+    request.onsuccess = (event) => {
+      const db = event.target.result;
+      const transaction = db.transaction(['keys'], 'readwrite');
+      const store = transaction.objectStore('keys');
+      
+      const data = {
+        id: 'main_keys',
+        supabaseUrl: supabaseUrl,
+        supabaseKey: supabaseKey,
+        botToken: botToken,
+        chatId: chatId,
+        updatedAt: new Date().toISOString()
+      };
+      
+      const putRequest = store.put(data);
+      putRequest.onsuccess = () => resolve();
+      putRequest.onerror = () => reject(putRequest.error);
+    };
+    
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Функция для загрузки ключей из IndexedDB
+function loadKeysFromDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(KEY_STORE_NAME, KEY_STORE_VERSION);
+    
+    request.onsuccess = (event) => {
+      const db = event.target.result;
+      
+      // Проверяем, есть ли хранилище
+      if (!db.objectStoreNames.contains('keys')) {
+        resolve(null);
+        return;
+      }
+      
+      const transaction = db.transaction(['keys'], 'readonly');
+      const store = transaction.objectStore('keys');
+      const getRequest = store.get('main_keys');
+      
+      getRequest.onsuccess = () => {
+        resolve(getRequest.result || null);
+      };
+      getRequest.onerror = () => reject(getRequest.error);
+    };
+    
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Функция для запроса ключей у пользователя (только при первом запуске)
+async function promptForKeys() {
+  return new Promise((resolve) => {
+    // Создаем модальное окно для ввода ключей
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 9999;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      backdrop-filter: blur(8px);
+    `;
+    
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 30px;
+      max-width: 500px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow);
+    `;
+    
+    modal.innerHTML = `
+      <h2 style="margin-bottom: 20px; color: var(--accent);">🔐 Настройка подключения</h2>
+      <p style="color: var(--text-dim); margin-bottom: 20px; font-size: 0.9rem;">
+        Введите ключи для подключения к облачному хранилищу и Telegram боту.
+        Ключи будут сохранены локально и не потребуются при следующих запусках.
+      </p>
+      
+      <div class="form-group">
+        <label>🌐 Supabase URL</label>
+        <input type="text" id="keySupabaseUrl" placeholder="https://your-project.supabase.co">
+      </div>
+      
+      <div class="form-group">
+        <label>🔑 Supabase Anon Key</label>
+        <input type="password" id="keySupabaseKey" placeholder="Ваш anon key">
+        <div style="font-size:0.7rem;color:var(--text-dim);margin-top:4px;">Нажмите 👁️ чтобы показать/скрыть</div>
+      </div>
+      
+      <div class="form-group">
+        <label>🤖 Telegram Bot Token</label>
+        <input type="password" id="keyBotToken" placeholder="Ваш bot token">
+      </div>
+      
+      <div class="form-group">
+        <label>💬 Telegram Chat ID</label>
+        <input type="text" id="keyChatId" placeholder="Ваш chat ID">
+      </div>
+      
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button class="btn btn-primary" id="saveKeysBtn" style="flex:1;">💾 Сохранить ключи</button>
+      </div>
+    `;
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    // Добавляем функционал показа/скрытия паролей
+    modal.querySelectorAll('input[type="password"]').forEach(input => {
+      const wrapper = input.parentElement;
+      const toggleBtn = document.createElement('button');
+      toggleBtn.textContent = '👁️';
+      toggleBtn.style.cssText = `
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 1rem;
+        padding: 4px 8px;
+      `;
+      wrapper.style.position = 'relative';
+      wrapper.appendChild(toggleBtn);
+      
+      toggleBtn.onclick = () => {
+        input.type = input.type === 'password' ? 'text' : 'password';
+        toggleBtn.textContent = input.type === 'password' ? '👁️' : '👁️‍🗨️';
+      };
+    });
+    
+    document.getElementById('saveKeysBtn').onclick = async () => {
+      const supabaseUrl = document.getElementById('keySupabaseUrl').value.trim();
+      const supabaseKey = document.getElementById('keySupabaseKey').value.trim();
+      const botToken = document.getElementById('keyBotToken').value.trim();
+      const chatId = document.getElementById('keyChatId').value.trim();
+      
+      if (!supabaseUrl || !supabaseKey || !botToken || !chatId) {
+        showNotification('⚠️ Заполните все поля!', 'error');
+        return;
+      }
+      
+      try {
+        await saveKeysToDB(supabaseUrl, supabaseKey, botToken, chatId);
+        overlay.remove();
+        resolve({ supabaseUrl, supabaseKey, botToken, chatId });
+        showNotification('✅ Ключи сохранены!', 'success');
+      } catch (error) {
+        showNotification('❌ Ошибка сохранения: ' + error.message, 'error');
+      }
+    };
+  });
+}
+
+// Основная функция инициализации ключей
+async function initializeKeys() {
+  // Проверяем, есть ли ключи в IndexedDB
+  let savedKeys = null;
+  try {
+    savedKeys = await loadKeysFromDB();
+  } catch (e) {
+    console.warn('Ошибка загрузки ключей:', e);
+  }
+  
+  if (savedKeys) {
+    // Ключи найдены - используем их
+    return {
+      supabaseUrl: savedKeys.supabaseUrl,
+      supabaseKey: savedKeys.supabaseKey,
+      botToken: savedKeys.botToken,
+      chatId: savedKeys.chatId
+    };
+  } else {
+    // Ключей нет - запрашиваем у пользователя
+    return await promptForKeys();
+  }
+}
+
+// Функция для редактирования ключей (можно добавить в интерфейс)
+async function editKeys() {
+  const keys = await promptForKeys();
+  if (keys) {
+    SUPABASE_URL = keys.supabaseUrl;
+    SUPABASE_ANON_KEY = keys.supabaseKey;
+    TELEGRAM_BOT_TOKEN = keys.botToken;
+    TELEGRAM_CHAT_ID = keys.chatId;
+    showNotification('✅ Ключи обновлены!', 'success');
+  }
+}
 
 // ==================== INDEXEDDB ====================
 let db = null;
@@ -2036,6 +2255,10 @@ async function supabaseFetch(endpoint, options = {}) {
 }
 
 async function syncFromCloud() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    showNotification('⚠️ Ключи не загружены, перезагрузите страницу', 'error');
+    return;
+  }
   const statusEl = document.getElementById('syncStatus');
   const originalText = statusEl.textContent;
   
@@ -2124,6 +2347,10 @@ statusEl.className = 'sync-status success';
 }
 
 async function syncToCloud() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.warn('Ключи не загружены, синхронизация отложена');
+    return;
+  }
   const localTasks = await getTasks();
   if (localTasks.length === 0) return;
   
@@ -3261,8 +3488,8 @@ async function backupToTelegram(manual = true) {
     // Отправляем в Telegram
     statusEl.textContent = '📤 Отправка в Telegram...';
     
-    const BOT_TOKEN = '8776022971:AAEx2J-t35xxzEqkp5HXzO9WI6sslIY5Cnk';
-    const CHAT_ID = '5283405965';
+    const BOT_TOKEN = TELEGRAM_BOT_TOKEN;
+    const CHAT_ID = TELEGRAM_CHAT_ID;
     
     const formData = new FormData();
     formData.append('chat_id', CHAT_ID);
@@ -3512,15 +3739,34 @@ function restoreFromZip() {
   input.click();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-  // Сначала показываем локальные данные (если есть)
-  refreshAll();
+document.addEventListener('DOMContentLoaded', async function() {
+  // Инициализируем ключи
+  try {
+    const keys = await initializeKeys();
+    SUPABASE_URL = keys.supabaseUrl;
+    SUPABASE_ANON_KEY = keys.supabaseKey;
+    TELEGRAM_BOT_TOKEN = keys.botToken;
+    TELEGRAM_CHAT_ID = keys.chatId;
+    
+    console.log('✅ Ключи загружены');
+  } catch (error) {
+    console.error('❌ Ошибка инициализации ключей:', error);
+    showNotification('❌ Ошибка загрузки ключей', 'error');
+  }
   
-  // Потом синхронизируем с облаком
-  setTimeout(() => {
-    syncFromCloud();
+  // Показываем локальные данные
+  await refreshAll();
+  
+  // Синхронизируем с облаком
+  setTimeout(async () => {
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      await syncFromCloud();
+    } else {
+      showNotification('⚠️ Ключи не настроены, облачная синхронизация недоступна', 'warning');
+    }
   }, 500);
 });
+  
 // Регистрация Service Worker для PWA и офлайн-режима
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/pinkman/sw.js')
