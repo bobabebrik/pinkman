@@ -1699,7 +1699,6 @@ function loadKeysFromDB() {
 }
 
 // Функция для запроса ключей у пользователя (только при первом запуске)
-// Функция для запроса ключей у пользователя (только при первом запуске)
 async function promptForKeys() {
   return new Promise((resolve) => {
     // Создаем модальное окно для ввода ключей
@@ -1792,7 +1791,7 @@ async function promptForKeys() {
       };
     });
     
-    // === ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ===
+    // === ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ДЛЯ ТЕЛЕФОНА ===
     const saveBtn = document.getElementById('saveKeysBtn');
     saveBtn.onclick = async function(e) {
       e.preventDefault();
@@ -1815,14 +1814,26 @@ async function promptForKeys() {
         
         await saveKeysToDB(supabaseUrl, supabaseKey, botToken, chatId);
         
-        // Удаляем модалку
+        // Удаляем модалку ПЕРЕД resolve
         overlay.remove();
         
-        // Возвращаем ключи
+        // Сохраняем ключи в localStorage как резерв
+        try {
+          localStorage.setItem('olprog_keys_backup', JSON.stringify({
+            supabaseUrl, supabaseKey, botToken, chatId
+          }));
+        } catch(e) {}
+        
+        // Вызываем resolve
         resolve({ supabaseUrl, supabaseKey, botToken, chatId });
         
-        alert('✅ Ключи сохранены! Страница обновится...');
-        location.reload();
+        // Показываем сообщение
+        showNotification('✅ Ключи сохранены!', 'success');
+        
+        // Перезагружаем через 1 секунду
+        setTimeout(() => {
+          location.reload();
+        }, 1000);
         
       } catch (error) {
         console.error('❌ Ошибка:', error);
