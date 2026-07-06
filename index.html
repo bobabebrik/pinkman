@@ -1618,19 +1618,31 @@ const KEY_STORE_NAME = 'olprog_keys';
 const KEY_STORE_VERSION = 1;
 
 // Функция для сохранения ключей в IndexedDB
+// Функция для сохранения ключей в IndexedDB
 function saveKeysToDB(supabaseUrl, supabaseKey, botToken, chatId) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(KEY_STORE_NAME, KEY_STORE_VERSION);
     
+    // ВАЖНО: создаём хранилище при первом открытии
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
+      // Создаём хранилище keys, если его нет
       if (!db.objectStoreNames.contains('keys')) {
-        db.createObjectStore('keys', { keyPath: 'id' });
+        const store = db.createObjectStore('keys', { keyPath: 'id' });
+        console.log('✅ Создано хранилище keys');
       }
     };
     
     request.onsuccess = (event) => {
       const db = event.target.result;
+      
+      // Проверяем, есть ли хранилище
+      if (!db.objectStoreNames.contains('keys')) {
+        console.error('❌ Хранилище keys не существует!');
+        reject(new Error('Хранилище keys не найдено'));
+        return;
+      }
+      
       const transaction = db.transaction(['keys'], 'readwrite');
       const store = transaction.objectStore('keys');
       
@@ -1644,11 +1656,20 @@ function saveKeysToDB(supabaseUrl, supabaseKey, botToken, chatId) {
       };
       
       const putRequest = store.put(data);
-      putRequest.onsuccess = () => resolve();
-      putRequest.onerror = () => reject(putRequest.error);
+      putRequest.onsuccess = () => {
+        console.log('✅ Ключи сохранены в IndexedDB');
+        resolve();
+      };
+      putRequest.onerror = () => {
+        console.error('❌ Ошибка сохранения:', putRequest.error);
+        reject(putRequest.error);
+      };
     };
     
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      console.error('❌ Ошибка открытия БД:', request.error);
+      reject(request.error);
+    };
   });
 }
 
