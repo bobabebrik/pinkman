@@ -1846,27 +1846,41 @@ async function promptForKeys() {
 }
 
 // Основная функция инициализации ключей
+// Основная функция инициализации ключей
 async function initializeKeys() {
-  // Проверяем, есть ли ключи в IndexedDB
+  // Сначала проверяем IndexedDB
   let savedKeys = null;
   try {
     savedKeys = await loadKeysFromDB();
   } catch (e) {
-    console.warn('Ошибка загрузки ключей:', e);
+    console.warn('Ошибка загрузки ключей из IndexedDB:', e);
   }
   
   if (savedKeys) {
-    // Ключи найдены - используем их
     return {
       supabaseUrl: savedKeys.supabaseUrl,
       supabaseKey: savedKeys.supabaseKey,
       botToken: savedKeys.botToken,
       chatId: savedKeys.chatId
     };
-  } else {
-    // Ключей нет - запрашиваем у пользователя
-    return await promptForKeys();
   }
+  
+  // Если в IndexedDB нет - проверяем localStorage (резерв)
+  try {
+    const backup = localStorage.getItem('olprog_keys_backup');
+    if (backup) {
+      const keys = JSON.parse(backup);
+      console.log('✅ Ключи загружены из localStorage (резерв)');
+      // Сохраняем в IndexedDB
+      await saveKeysToDB(keys.supabaseUrl, keys.supabaseKey, keys.botToken, keys.chatId);
+      return keys;
+    }
+  } catch (e) {
+    console.warn('Ошибка загрузки из localStorage:', e);
+  }
+  
+  // Ключей нет - запрашиваем у пользователя
+  return await promptForKeys();
 }
 
 // Функция для редактирования ключей (можно добавить в интерфейс)
