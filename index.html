@@ -1617,84 +1617,44 @@ let TELEGRAM_CHAT_ID = '';
 const KEY_STORE_NAME = 'olprog_keys';
 const KEY_STORE_VERSION = 2;
 
-// Функция для сохранения ключей в IndexedDB
+
+// Сохранение ключей в localStorage (просто и надёжно)
 function saveKeysToDB(supabaseUrl, supabaseKey, botToken, chatId) {
-  return new Promise((resolve, reject) => {
-    // Используем версию 2, чтобы onupgradeneeded точно сработал
-    const request = indexedDB.open(KEY_STORE_NAME, 2);
-    
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains('keys')) {
-        db.createObjectStore('keys', { keyPath: 'id' });
-        console.log('✅ Создано хранилище keys');
-      }
-    };
-    
-    request.onsuccess = (event) => {
-      const db = event.target.result;
-      
-      // Дополнительная проверка
-      if (!db.objectStoreNames.contains('keys')) {
-        console.error('❌ Хранилище keys не существует!');
-        reject(new Error('Хранилище keys не найдено'));
-        return;
-      }
-      
-      const transaction = db.transaction(['keys'], 'readwrite');
-      const store = transaction.objectStore('keys');
-      
+  return new Promise((resolve) => {
+    try {
       const data = {
-        id: 'main_keys',
         supabaseUrl: supabaseUrl,
         supabaseKey: supabaseKey,
         botToken: botToken,
         chatId: chatId,
         updatedAt: new Date().toISOString()
       };
-      
-      const putRequest = store.put(data);
-      putRequest.onsuccess = () => {
-        console.log('✅ Ключи сохранены в IndexedDB');
-        resolve();
-      };
-      putRequest.onerror = () => {
-        console.error('❌ Ошибка сохранения:', putRequest.error);
-        reject(putRequest.error);
-      };
-    };
-    
-    request.onerror = (event) => {
-      console.error('❌ Ошибка открытия БД:', event.target.error);
-      reject(event.target.error);
-    };
+      localStorage.setItem('olprog_keys', JSON.stringify(data));
+      console.log('✅ Ключи сохранены в localStorage');
+      resolve();
+    } catch (error) {
+      console.error('❌ Ошибка сохранения:', error);
+      resolve(); // Всё равно резолвим, чтобы не ломать
+    }
   });
 }
-// Функция для загрузки ключей из IndexedDB
+  
+// Загрузка ключей из localStorage
 function loadKeysFromDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(KEY_STORE_NAME, KEY_STORE_VERSION);
-    
-    request.onsuccess = (event) => {
-      const db = event.target.result;
-      
-      // Проверяем, есть ли хранилище
-      if (!db.objectStoreNames.contains('keys')) {
+  return new Promise((resolve) => {
+    try {
+      const data = localStorage.getItem('olprog_keys');
+      if (data) {
+        const parsed = JSON.parse(data);
+        console.log('✅ Ключи загружены из localStorage');
+        resolve(parsed);
+      } else {
         resolve(null);
-        return;
       }
-      
-      const transaction = db.transaction(['keys'], 'readonly');
-      const store = transaction.objectStore('keys');
-      const getRequest = store.get('main_keys');
-      
-      getRequest.onsuccess = () => {
-        resolve(getRequest.result || null);
-      };
-      getRequest.onerror = () => reject(getRequest.error);
-    };
-    
-    request.onerror = () => reject(request.error);
+    } catch (error) {
+      console.error('❌ Ошибка загрузки:', error);
+      resolve(null);
+    }
   });
 }
 
