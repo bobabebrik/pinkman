@@ -373,17 +373,17 @@
 
   .chart-canvas-wrap {
     position: relative;
-    min-width: 100%;
     width: max-content;
     height: 180px;
-  }
+    /* min-width: 100%; ← УДАЛИЛИ */
+}
 
-  #weeklyChartCanvas {
+#weeklyChartCanvas {
     display: block;
     height: 180px;
     width: auto;
-    min-width: 100%;
-  }
+    /* min-width: 100%; ← УДАЛИЛИ */
+}
 
   /* Donut Chart */
   .donut-container {
@@ -1310,6 +1310,51 @@
   background: var(--accent) !important;
 }
 
+/* ===== ФИКС ДЛЯ ПК: ГРАФИК КАК НА ТЕЛЕФОНЕ ===== */
+@media (min-width: 601px) {
+  /* Контейнер с прокруткой - ограниченная видимая область */
+  .chart-scroll-wrapper {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    scroll-behavior: smooth !important;
+    touch-action: pan-x !important;
+    cursor: grab !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Канвас не растягивается, занимает свою реальную ширину */
+  .chart-canvas-wrap {
+    width: max-content !important;
+    min-width: unset !important;
+  }
+  
+  #weeklyChartCanvas {
+    width: auto !important;
+    min-width: unset !important;
+  }
+  
+  /* Красивый скроллбар для ПК */
+  .chart-scroll-wrapper::-webkit-scrollbar {
+    height: 4px !important;
+  }
+  
+  .chart-scroll-wrapper::-webkit-scrollbar-track {
+    background: var(--surface2) !important;
+    border-radius: 4px !important;
+  }
+  
+  .chart-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: var(--accent) !important;
+    border-radius: 4px !important;
+  }
+  
+  .chart-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-hover) !important;
+  }
+}
+  
 </style>
 <!-- Highlight.js для подсветки синтаксиса -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
