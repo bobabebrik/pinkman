@@ -2863,9 +2863,6 @@ async function renderWeeklyChart() {
   
   if (!canvas) return;
   
-  // Определяем, ПК это или телефон
-  const isMobile = window.innerWidth <= 600;
-  
   // Собираем все даты с задачами
   const dateCounts = {};
   tasks.forEach(t => {
@@ -2874,25 +2871,25 @@ async function renderWeeklyChart() {
     }
   });
   
-  // Получаем все даты, сортируем
-  const allDates = Object.keys(dateCounts).sort();
-  
-  // Добавляем сегодня, если его нет
+  // Получаем все даты за последние 30 дней (включая дни без задач)
   const today = new Date();
-  const todayStr = formatLocalDate(today);
-  if (!dateCounts[todayStr]) {
-    dateCounts[todayStr] = 0;
+  const allDates = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = formatLocalDate(d);
+    allDates.push(dateStr);
+    // Если даты нет в dateCounts, добавляем с 0
+    if (!dateCounts[dateStr]) {
+      dateCounts[dateStr] = 0;
+    }
   }
   
   // Сортируем все даты
-  const allDatesSorted = Object.keys(dateCounts).sort();
+  const allDatesSorted = allDates.sort();
   
-  // ===== ДЛЯ ПК: ПОКАЗЫВАЕМ ТОЛЬКО ПОСЛЕДНИЕ 7 ДНЕЙ =====
-  // ===== ДЛЯ ТЕЛЕФОНА: ПОКАЗЫВАЕМ ВСЕ ДАТЫ С ПРОКРУТКОЙ =====
+  // ===== ДЛЯ ПК И ТЕЛЕФОНА ОДИНАКОВЫЙ ГРАФИК С ПРОКРУТКОЙ =====
   let displayDates = allDatesSorted;
-  if (!isMobile && allDatesSorted.length > 7) {
-    displayDates = allDatesSorted.slice(-7);
-  }
   
   if (displayDates.length === 0) {
     const ctx = canvas.getContext('2d');
@@ -2914,8 +2911,8 @@ async function renderWeeklyChart() {
   }
   
   // Находим максимум для шкалы
-  const maxCount = Math.max(...Object.values(dateCounts).filter(v => v > 0), 5);
-  const yMax = Math.max(maxCount, 5);
+  const maxCount = Math.max(...Object.values(dateCounts).filter(v => v > 0), 1);
+  const yMax = Math.max(maxCount, 1);
   
   // Настройки
   const dpr = window.devicePixelRatio || 1;
@@ -2925,21 +2922,9 @@ async function renderWeeklyChart() {
   const padLeft = 30;
   const minWidth = wrapper.clientWidth || 400;
   
-  // На ПК — фиксированная ширина под 7 дней
-  let dayWidth;
-  let totalWidth;
-  
-  if (isMobile) {
-    // Телефон: адаптивная ширина, много дней
-    dayWidth = Math.max(40, Math.min(50, (minWidth - padLeft - 20) / Math.max(displayDates.length, 5)));
-    totalWidth = Math.max(displayDates.length * dayWidth + padLeft + 20, minWidth);
-  } else {
-    // ПК: фиксированная ширина под 7 дней
-    const maxDays = 7;
-    const actualDays = Math.min(displayDates.length, maxDays);
-    dayWidth = Math.min(60, (minWidth - padLeft - 20) / actualDays);
-    totalWidth = Math.max(actualDays * dayWidth + padLeft + 20, minWidth);
-  }
+  // Адаптивная ширина для любого количества дней
+  const dayWidth = Math.max(30, Math.min(45, (minWidth - padLeft - 20) / Math.max(displayDates.length, 5)));
+  const totalWidth = Math.max(displayDates.length * dayWidth + padLeft + 20, minWidth);
   
   canvas.width = totalWidth * dpr;
   canvas.height = chartHeight * dpr;
@@ -2994,7 +2979,7 @@ async function renderWeeklyChart() {
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 5]);
   
-  const step = yMax <= 5 ? 1 : 2;
+  const step = yMax <= 5 ? 1 : Math.ceil(yMax / 5);
   for (let v = step; v <= yMax; v += step) {
     const y = padTop + chartH - (v / yMax) * chartH;
     ctx.beginPath();
@@ -3117,24 +3102,15 @@ async function renderWeeklyChart() {
   }
   statsLabel.textContent = `● всего: ${totalTasks} задач`;
   
-  // ===== АВТОПРОКРУТКА ТОЛЬКО ДЛЯ ТЕЛЕФОНА =====
-  if (isMobile) {
-    setTimeout(() => {
-      if (wrapper) {
-        wrapper.scrollLeft = wrapper.scrollWidth - wrapper.clientWidth;
-      }
-    }, 100);
-  }
-  
-  // ===== ПРОКРУТКА ТОЛЬКО ДЛЯ ТЕЛЕФОНА =====
-  if (isMobile && wrapper) {
+  // ===== ПРОКРУТКА ДЛЯ ПК И ТЕЛЕФОНА (ОДИНАКОВАЯ) =====
+  if (wrapper) {
     wrapper.style.overflowX = 'auto';
     wrapper.style.overflowY = 'hidden';
     wrapper.style.webkitOverflowScrolling = 'touch';
     wrapper.style.scrollBehavior = 'smooth';
     wrapper.style.touchAction = 'pan-x';
     
-    // Поддержка колёсика мыши
+    // Поддержка колёсика мыши для ПК
     wrapper.addEventListener('wheel', function(e) {
       if (this.scrollWidth > this.clientWidth) {
         e.preventDefault();
@@ -3142,18 +3118,12 @@ async function renderWeeklyChart() {
       }
     }, { passive: false });
     
-    // Автопрокрутка только при загрузке
+    // Автопрокрутка к сегодня
     if (!wrapper._autoscrolled) {
       wrapper._autoscrolled = true;
       setTimeout(() => {
         wrapper.scrollLeft = wrapper.scrollWidth - wrapper.clientWidth;
       }, 150);
-    }
-  } else {
-    // На ПК — отключаем прокрутку
-    if (wrapper) {
-      wrapper.style.overflowX = 'hidden';
-      wrapper.style.overflowY = 'hidden';
     }
   }
 }
