@@ -2920,7 +2920,7 @@ function formatLocalDate(date) {
   return `${year}-${month}-${day}`;
 }
 
-// ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ renderWeeklyChart =====
+// ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ renderWeeklyChart (С ПОДДЕРЖКОЙ РЕТИНА) =====
 async function renderWeeklyChart() {
   const canvas = document.getElementById('weeklyChartCanvas');
   const container = document.getElementById('graphContainer');
@@ -2939,7 +2939,7 @@ async function renderWeeklyChart() {
     }
   });
   
-  // Находим самую раннюю дату (правильно сортируем как даты)
+  // Находим самую раннюю дату
   const allDates = Object.keys(dateCounts).sort((a, b) => {
     return new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00');
   });
@@ -2948,7 +2948,6 @@ async function renderWeeklyChart() {
   const today = new Date();
   const dates = [];
   
-  // Если есть первая задача - начинаем с неё минус 7 дней
   let startDate;
   if (firstDate) {
     const d = new Date(firstDate + 'T00:00:00');
@@ -2959,7 +2958,6 @@ async function renderWeeklyChart() {
     startDate.setDate(startDate.getDate() - 60);
   }
   
-  // Строим все даты от startDate до сегодня
   const current = new Date(startDate);
   while (current <= today) {
     const year = current.getFullYear();
@@ -2973,12 +2971,10 @@ async function renderWeeklyChart() {
     current.setDate(current.getDate() + 1);
   }
   
-  // Логируем для проверки
-  console.log('Первая задача:', firstDate);
-  console.log('Начало графика:', dates[0]);
-  console.log('Всего дней:', dates.length);
-  
   const maxCount = Math.max(...Object.values(dateCounts), 1);
+  
+  // ===== РАЗМЕРЫ ДЛЯ РЕТИНА =====
+  const dpr = window.devicePixelRatio || 1;  // ← Добавляем поддержку ретина
   const W = 1400;
   const H = 180;
   const padLeft = 35;
@@ -2986,12 +2982,19 @@ async function renderWeeklyChart() {
   const chartH = H - padTop - 30;
   const dayWidth = (W - padLeft - 20) / dates.length;
   
+  // Устанавливаем размеры канваса с учётом DPR
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  
   const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);  // ← Масштабируем для ретина
+  
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#1a1d27';
   ctx.fillRect(0, 0, W, H);
   
-  // ===== НОВАЯ ЦВЕТОВАЯ СХЕМА =====
   function getColor(count) {
     if (count === 0) return '#1a2332';
     if (count === 1) return '#2a4a7f';
@@ -3134,14 +3137,13 @@ async function renderWeeklyChart() {
   rangeLabel.textContent = `${firstDateObj.getDate()} ${monthNames[firstDateObj.getMonth()]} — ${lastDateObj.getDate()} ${monthNames[lastDateObj.getMonth()]}`;
   statsLabel.textContent = `● всего: ${totalTasks} задач`;
   
-  // Прокрутка колесиком (плавная, по 30-40px за шаг)
-container.addEventListener('wheel', function(e) {
-  if (this.scrollWidth > this.clientWidth) {
-    e.preventDefault();
-    // Умножаем deltaY на 0.3 чтобы прокрутка была медленнее
-    this.scrollLeft += e.deltaY * 0.3;
-  }
-}, { passive: false });
+  // Прокрутка колесиком
+  container.addEventListener('wheel', function(e) {
+    if (this.scrollWidth > this.clientWidth) {
+      e.preventDefault();
+      this.scrollLeft += e.deltaY * 0.3;
+    }
+  }, { passive: false });
   
   // Автопрокрутка к сегодня
   setTimeout(() => {
