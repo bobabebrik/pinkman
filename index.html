@@ -1474,16 +1474,37 @@
       </div>
     </div>
     <div class="chart-card">
-  <div class="chart-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <h3 style="margin:0;">📈 Активность по дням</h3>
+  <div style="margin-bottom:12px;">
+    <h3 style="margin:0;font-size:1rem;font-weight:600;">📈 Активность по дням</h3>
     <span style="font-size:0.65rem;color:var(--text-dim);">← листай →</span>
   </div>
-  <div class="chart-scroll-wrapper" id="weeklyWrapper" style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scroll-behavior:smooth;border-radius:8px;">
-    <div class="chart-canvas-wrap" style="position:relative;width:max-content;height:180px;">
-      <canvas id="weeklyChartCanvas"></canvas>
+  
+  <!-- КОНТЕЙНЕР 400px С ПРОКРУТКОЙ -->
+  <div id="graphContainer" style="
+    width:400px;
+    max-width:100%;
+    overflow-x:auto;
+    overflow-y:hidden;
+    border-radius:8px;
+    position:relative;
+  ">
+    <!-- КАНВАС 1400px ВНУТРИ -->
+    <div id="graphInner" style="
+      position:relative;
+      width:1400px;
+      height:180px;
+      background:#1a1d27;
+      border-radius:8px;
+    ">
+      <canvas id="weeklyChartCanvas" 
+        width="1400" 
+        height="180" 
+        style="width:1400px;height:180px;display:block;border-radius:8px;"
+      ></canvas>
     </div>
   </div>
-  <div class="chart-footer" style="display:flex;justify-content:space-between;margin-top:8px;font-size:0.6rem;color:var(--text-dim);">
+  
+  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:0.6rem;color:var(--text-dim);">
     <span id="weeklyRange">Сегодня</span>
     <span id="weeklyStats">● всего: 0 задач</span>
   </div>
@@ -2899,16 +2920,18 @@ function formatLocalDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+// ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ renderWeeklyChart =====
 async function renderWeeklyChart() {
-  const tasks = await getTasks();
   const canvas = document.getElementById('weeklyChartCanvas');
-  const wrapper = document.getElementById('weeklyWrapper');
+  const container = document.getElementById('graphContainer');
   const rangeLabel = document.getElementById('weeklyRange');
   const statsLabel = document.getElementById('weeklyStats');
   
-  if (!canvas) return;
+  if (!canvas || !container) return;
   
-  // Собираем все даты с задачами
+  const tasks = await getTasks();
+  
+  // Собираем данные
   const dateCounts = {};
   tasks.forEach(t => {
     if (t.solvedDate) {
@@ -2916,70 +2939,59 @@ async function renderWeeklyChart() {
     }
   });
   
-  const today = new Date();
-  const todayStr = formatLocalDate(today);
+  // Находим самую раннюю дату (правильно сортируем как даты)
+  const allDates = Object.keys(dateCounts).sort((a, b) => {
+    return new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00');
+  });
+  const firstDate = allDates.length > 0 ? allDates[0] : null;
   
-  // ПОКАЗЫВАЕМ ПОСЛЕДНИЕ 60 ДНЕЙ
-  const allDates = [];
-  for (let i = 59; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = formatLocalDate(d);
-    allDates.push(dateStr);
+  const today = new Date();
+  const dates = [];
+  
+  // Если есть первая задача - начинаем с неё минус 7 дней
+  let startDate;
+  if (firstDate) {
+    const d = new Date(firstDate + 'T00:00:00');
+    d.setDate(d.getDate() - 7);
+    startDate = d;
+  } else {
+    startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - 60);
+  }
+  
+  // Строим все даты от startDate до сегодня
+  const current = new Date(startDate);
+  while (current <= today) {
+    const year = current.getFullYear();
+    const month = String(current.getMonth() + 1).padStart(2, '0');
+    const day = String(current.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    dates.push(dateStr);
     if (!dateCounts[dateStr]) {
       dateCounts[dateStr] = 0;
     }
+    current.setDate(current.getDate() + 1);
   }
   
-  const displayDates = allDates.sort();
+  // Логируем для проверки
+  console.log('Первая задача:', firstDate);
+  console.log('Начало графика:', dates[0]);
+  console.log('Всего дней:', dates.length);
   
-  if (displayDates.length === 0) {
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    const w = 400;
-    canvas.width = w * dpr;
-    canvas.height = 180 * dpr;
-    canvas.style.width = w + 'px';
-    canvas.style.height = '180px';
-    ctx.scale(dpr, dpr);
-    ctx.fillStyle = 'var(--text-dim)';
-    ctx.font = '12px Segoe UI';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('📭 Нет данных', w / 2, 90);
-    rangeLabel.textContent = 'Нет данных';
-    statsLabel.textContent = '● всего: 0 задач';
-    return;
-  }
-  
-  const maxCount = Math.max(...Object.values(dateCounts).filter(v => v > 0), 1);
-  const yMax = Math.max(maxCount, 1);
-  
-  const dpr = window.devicePixelRatio || 1;
-  const chartHeight = 180;
+  const maxCount = Math.max(...Object.values(dateCounts), 1);
+  const W = 1400;
+  const H = 180;
+  const padLeft = 35;
   const padTop = 20;
-  const padBottom = 30;
-  const padLeft = 25;
-  
-  // ===== ГЛАВНОЕ ИЗМЕНЕНИЕ: ФИКСИРОВАННАЯ ШИРИНА КАНВАСА =====
-  // Канвас всегда 1400px, контейнер его обрезает через overflow
-  const canvasWidth = 1400;
-  const dayWidth = (canvasWidth - padLeft - 20) / displayDates.length;
-  
-  canvas.width = canvasWidth * dpr;
-  canvas.height = chartHeight * dpr;
-  canvas.style.width = canvasWidth + 'px';  // ← ФИКСИРОВАННАЯ ШИРИНА!
-  canvas.style.height = chartHeight + 'px';
+  const chartH = H - padTop - 30;
+  const dayWidth = (W - padLeft - 20) / dates.length;
   
   const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  
-  const W = canvasWidth;
-  const H = chartHeight;
-  const chartH = H - padTop - padBottom;
-  
   ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#1a1d27';
+  ctx.fillRect(0, 0, W, H);
   
+  // ===== НОВАЯ ЦВЕТОВАЯ СХЕМА =====
   function getColor(count) {
     if (count === 0) return '#1a2332';
     if (count === 1) return '#2a4a7f';
@@ -2989,37 +3001,16 @@ async function renderWeeklyChart() {
     if (count === 5) return '#e74c3c';
     if (count === 6) return '#cc2233';
     if (count === 7) return '#991122';
-    if (count === 8) return '#660011';
-    if (count === 9) return '#330008';
-    return '#1a0004';
+    if (count >= 8) return '#000000';
+    return '#1a2332';
   }
-  
-  function formatShortDate(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-  }
-  
-  function getWeekdayShort(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('ru-RU', { weekday: 'short' });
-  }
-  
-  const dataPoints = [];
-  displayDates.forEach((date, index) => {
-    const count = dateCounts[date] || 0;
-    const x = padLeft + index * dayWidth + dayWidth / 2;
-    const y = padTop + chartH - (count / yMax) * chartH;
-    dataPoints.push({ x, y, count, date, isToday: date === todayStr });
-  });
   
   // Сетка
   ctx.strokeStyle = '#2e3348';
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 5]);
-  
-  const step = yMax <= 5 ? 1 : Math.ceil(yMax / 5);
-  for (let v = step; v <= yMax; v += step) {
-    const y = padTop + chartH - (v / yMax) * chartH;
+  for (let v = 1; v <= maxCount; v++) {
+    const y = padTop + chartH - (v / maxCount) * chartH;
     ctx.beginPath();
     ctx.moveTo(padLeft, y);
     ctx.lineTo(W - 10, y);
@@ -3032,12 +3023,24 @@ async function renderWeeklyChart() {
   }
   ctx.setLineDash([]);
   
-  // Подписи дней (каждый 3-й или сегодня)
-  displayDates.forEach((date, index) => {
-    const x = padLeft + index * dayWidth + dayWidth / 2;
-    const isToday = date === todayStr;
+  // Точки
+  const points = [];
+  dates.forEach((date, i) => {
+    const count = dateCounts[date] || 0;
+    const x = padLeft + i * dayWidth + dayWidth / 2;
+    const y = padTop + chartH - (count / maxCount) * chartH;
+    points.push({ x, y, count, date, isToday: date === formatLocalDate(today) });
+  });
+  
+  // Подписи (каждый 5-й)
+  dates.forEach((date, i) => {
+    const x = padLeft + i * dayWidth + dayWidth / 2;
+    const d = new Date(date + 'T00:00:00');
+    const dayLabel = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    const weekday = d.toLocaleDateString('ru-RU', { weekday: 'short' });
+    const isToday = date === formatLocalDate(today);
     
-    if (index % 3 === 0 || isToday || index === displayDates.length - 1) {
+    if (i % 5 === 0 || isToday || i === dates.length - 1) {
       ctx.strokeStyle = '#2e3348';
       ctx.lineWidth = 0.5;
       ctx.beginPath();
@@ -3046,9 +3049,7 @@ async function renderWeeklyChart() {
       ctx.stroke();
     }
     
-    if (index % 3 === 0 || isToday || index === displayDates.length - 1) {
-      const dayLabel = formatShortDate(date);
-      const weekday = getWeekdayShort(date);
+    if (i % 5 === 0 || isToday || i === dates.length - 1) {
       ctx.fillStyle = isToday ? '#6c5ce7' : '#5a6a85';
       ctx.font = isToday ? 'bold 7px Segoe UI' : '7px Segoe UI';
       ctx.textAlign = 'center';
@@ -3059,45 +3060,41 @@ async function renderWeeklyChart() {
       if (isToday) {
         ctx.fillStyle = '#6c5ce7';
         ctx.font = '7px Segoe UI';
-        ctx.textBaseline = 'top';
         ctx.fillText('● сегодня', x, padTop + chartH + 24);
       }
     }
   });
   
-  // Линия с градиентом (цвета в зависимости от количества задач)
-  if (dataPoints.length > 1) {
-    for (let i = 0; i < dataPoints.length - 1; i++) {
-      const p1 = dataPoints[i];
-      const p2 = dataPoints[i + 1];
+  // Линия с градиентом
+  if (points.length > 1) {
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
       const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
       grad.addColorStop(0, getColor(p1.count));
       grad.addColorStop(1, getColor(p2.count));
       ctx.strokeStyle = grad;
       ctx.lineWidth = 2.5;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
       ctx.stroke();
     }
     
-    const fillGradient = ctx.createLinearGradient(0, padTop, 0, padTop + chartH);
-    fillGradient.addColorStop(0, 'rgba(108,92,231,0.3)');
-    fillGradient.addColorStop(0.5, 'rgba(108,92,231,0.08)');
-    fillGradient.addColorStop(1, 'rgba(108,92,231,0.01)');
-    ctx.fillStyle = fillGradient;
+    const fillGrad = ctx.createLinearGradient(0, padTop, 0, padTop + chartH);
+    fillGrad.addColorStop(0, 'rgba(108,92,231,0.3)');
+    fillGrad.addColorStop(1, 'rgba(108,92,231,0.01)');
+    ctx.fillStyle = fillGrad;
     ctx.beginPath();
-    ctx.moveTo(dataPoints[0].x, padTop + chartH);
-    dataPoints.forEach(p => ctx.lineTo(p.x, p.y));
-    ctx.lineTo(dataPoints[dataPoints.length - 1].x, padTop + chartH);
+    ctx.moveTo(points[0].x, padTop + chartH);
+    points.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(points[points.length - 1].x, padTop + chartH);
     ctx.closePath();
     ctx.fill();
   }
   
-  // Точки с цветом в зависимости от количества задач
-  dataPoints.forEach(p => {
+  // Точки
+  points.forEach(p => {
     const color = getColor(p.count);
     ctx.shadowColor = color;
     ctx.shadowBlur = p.isToday ? 14 : 6;
@@ -3120,8 +3117,7 @@ async function renderWeeklyChart() {
     }
     
     if (p.count > 0) {
-      const textColor = p.count >= 5 ? '#e74c3c' : '#8bbfff';
-      ctx.fillStyle = textColor;
+      ctx.fillStyle = p.count >= 5 ? '#e74c3c' : '#8bbfff';
       ctx.font = p.isToday ? 'bold 9px Segoe UI' : '8px Segoe UI';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
@@ -3131,44 +3127,25 @@ async function renderWeeklyChart() {
   
   // Подвал
   const totalTasks = Object.values(dateCounts).reduce((a, b) => a + b, 0);
-  const firstDate = displayDates[0];
-  const lastDate = displayDates[displayDates.length - 1];
-  const firstObj = new Date(firstDate + 'T00:00:00');
-  const lastObj = new Date(lastDate + 'T00:00:00');
+  const firstDateObj = new Date(dates[0] + 'T00:00:00');
+  const lastDateObj = new Date(dates[dates.length - 1] + 'T00:00:00');
   const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
   
-  if (firstDate === lastDate) {
-    rangeLabel.textContent = `${firstObj.getDate()} ${monthNames[firstObj.getMonth()]}`;
-  } else {
-    rangeLabel.textContent = `${firstObj.getDate()} ${monthNames[firstObj.getMonth()]} — ${lastObj.getDate()} ${monthNames[lastObj.getMonth()]}`;
-  }
+  rangeLabel.textContent = `${firstDateObj.getDate()} ${monthNames[firstDateObj.getMonth()]} — ${lastDateObj.getDate()} ${monthNames[lastDateObj.getMonth()]}`;
   statsLabel.textContent = `● всего: ${totalTasks} задач`;
   
-  // ===== ПРОКРУТКА =====
-  if (wrapper) {
-    wrapper.style.overflowX = 'auto';
-    wrapper.style.overflowY = 'hidden';
-    wrapper.style.webkitOverflowScrolling = 'touch';
-    wrapper.style.scrollBehavior = 'smooth';
-    wrapper.style.touchAction = 'pan-x';
-    
-    // Удаляем старый обработчик, чтобы не было дублей
-    const newWrapper = wrapper.cloneNode(true);
-    wrapper.parentNode.replaceChild(newWrapper, wrapper);
-    
-    // Добавляем обработчик колесика
-    newWrapper.addEventListener('wheel', function(e) {
-      if (this.scrollWidth > this.clientWidth) {
-        e.preventDefault();
-        this.scrollLeft += e.deltaY;
-      }
-    }, { passive: false });
-    
-    // Автопрокрутка к сегодня
-    setTimeout(() => {
-      newWrapper.scrollLeft = newWrapper.scrollWidth - newWrapper.clientWidth;
-    }, 150);
-  }
+  // Прокрутка колесиком
+  container.addEventListener('wheel', function(e) {
+    if (this.scrollWidth > this.clientWidth) {
+      e.preventDefault();
+      this.scrollLeft += e.deltaY;
+    }
+  }, { passive: false });
+  
+  // Автопрокрутка к сегодня
+  setTimeout(() => {
+    container.scrollLeft = container.scrollWidth - container.clientWidth;
+  }, 100);
 }
 
 async function renderDonut() {
