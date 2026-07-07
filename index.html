@@ -2712,6 +2712,7 @@ function showNotification(message, type = 'info') {
 async function renderStats() {
   const tasks = await getTasks();
   const today = new Date();
+  const todayStr = formatLocalDate(today);
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   
   const todayCount = tasks.filter(t => t.solvedDate === todayStr).length;
