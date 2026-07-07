@@ -2713,7 +2713,6 @@ async function renderStats() {
   const tasks = await getTasks();
   const today = new Date();
   const todayStr = formatLocalDate(today);
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   
   const todayCount = tasks.filter(t => t.solvedDate === todayStr).length;
   const totalCount = tasks.length;
@@ -2872,8 +2871,11 @@ async function renderWeeklyChart() {
     }
   });
   
-  // Получаем все даты за последние 30 дней (включая дни без задач)
+  // Получаем сегодняшнюю дату (объявляем ДО использования)
   const today = new Date();
+  const todayStr = formatLocalDate(today); // ← ЭТА СТРОКА БЫЛА ПРОПУЩЕНА
+  
+  // Получаем все даты за последние 30 дней (включая дни без задач)
   const allDates = [];
   for (let i = 29; i >= 0; i--) {
     const d = new Date(today);
