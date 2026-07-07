@@ -2916,33 +2916,27 @@ async function renderWeeklyChart() {
     }
   });
   
-  // Получаем сегодняшнюю дату (объявляем ДО использования)
   const today = new Date();
-  const todayStr = formatLocalDate(today); // ← ЭТА СТРОКА БЫЛА ПРОПУЩЕНА
+  const todayStr = formatLocalDate(today);
   
-  // Получаем все даты за последние 30 дней (включая дни без задач)
+  // ПОКАЗЫВАЕМ ПОСЛЕДНИЕ 60 ДНЕЙ
   const allDates = [];
-  for (let i = 29; i >= 0; i--) {
+  for (let i = 59; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const dateStr = formatLocalDate(d);
     allDates.push(dateStr);
-    // Если даты нет в dateCounts, добавляем с 0
     if (!dateCounts[dateStr]) {
       dateCounts[dateStr] = 0;
     }
   }
   
-  // Сортируем все даты
-  const allDatesSorted = allDates.sort();
-  
-  // ===== ДЛЯ ПК И ТЕЛЕФОНА ОДИНАКОВЫЙ ГРАФИК С ПРОКРУТКОЙ =====
-  let displayDates = allDatesSorted;
+  const displayDates = allDates.sort();
   
   if (displayDates.length === 0) {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    const w = wrapper.clientWidth || 400;
+    const w = 400;
     canvas.width = w * dpr;
     canvas.height = 180 * dpr;
     canvas.style.width = w + 'px';
@@ -2958,37 +2952,34 @@ async function renderWeeklyChart() {
     return;
   }
   
-  // Находим максимум для шкалы
   const maxCount = Math.max(...Object.values(dateCounts).filter(v => v > 0), 1);
   const yMax = Math.max(maxCount, 1);
   
-  // Настройки
   const dpr = window.devicePixelRatio || 1;
   const chartHeight = 180;
   const padTop = 20;
   const padBottom = 30;
-  const padLeft = 30;
-  const minWidth = wrapper.clientWidth || 400;
+  const padLeft = 25;
   
-  // Адаптивная ширина для любого количества дней
-  const dayWidth = Math.max(30, Math.min(45, (minWidth - padLeft - 20) / Math.max(displayDates.length, 5)));
-  const totalWidth = Math.max(displayDates.length * dayWidth + padLeft + 20, minWidth);
+  // ===== ГЛАВНОЕ ИЗМЕНЕНИЕ: ФИКСИРОВАННАЯ ШИРИНА КАНВАСА =====
+  // Канвас всегда 1400px, контейнер его обрезает через overflow
+  const canvasWidth = 1400;
+  const dayWidth = (canvasWidth - padLeft - 20) / displayDates.length;
   
-  canvas.width = totalWidth * dpr;
+  canvas.width = canvasWidth * dpr;
   canvas.height = chartHeight * dpr;
-  canvas.style.width = totalWidth + 'px';
+  canvas.style.width = canvasWidth + 'px';  // ← ФИКСИРОВАННАЯ ШИРИНА!
   canvas.style.height = chartHeight + 'px';
   
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   
-  const W = totalWidth;
+  const W = canvasWidth;
   const H = chartHeight;
   const chartH = H - padTop - padBottom;
   
   ctx.clearRect(0, 0, W, H);
   
-  // ===== ЦВЕТА =====
   function getColor(count) {
     if (count === 0) return '#1a2332';
     if (count === 1) return '#2a4a7f';
@@ -3013,7 +3004,6 @@ async function renderWeeklyChart() {
     return d.toLocaleDateString('ru-RU', { weekday: 'short' });
   }
   
-  // Собираем точки
   const dataPoints = [];
   displayDates.forEach((date, index) => {
     const count = dateCounts[date] || 0;
@@ -3022,7 +3012,7 @@ async function renderWeeklyChart() {
     dataPoints.push({ x, y, count, date, isToday: date === todayStr });
   });
   
-  // ===== СЕТКА =====
+  // Сетка
   ctx.strokeStyle = '#2e3348';
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 5]);
@@ -3042,36 +3032,40 @@ async function renderWeeklyChart() {
   }
   ctx.setLineDash([]);
   
-  // ===== ПОДПИСИ ДНЕЙ =====
+  // Подписи дней (каждый 3-й или сегодня)
   displayDates.forEach((date, index) => {
     const x = padLeft + index * dayWidth + dayWidth / 2;
     const isToday = date === todayStr;
     
-    ctx.strokeStyle = '#2e3348';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(x, padTop);
-    ctx.lineTo(x, padTop + chartH);
-    ctx.stroke();
+    if (index % 3 === 0 || isToday || index === displayDates.length - 1) {
+      ctx.strokeStyle = '#2e3348';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, padTop);
+      ctx.lineTo(x, padTop + chartH);
+      ctx.stroke();
+    }
     
-    const dayLabel = formatShortDate(date);
-    const weekday = getWeekdayShort(date);
-    ctx.fillStyle = isToday ? '#6c5ce7' : '#5a6a85';
-    ctx.font = isToday ? 'bold 7px Segoe UI' : '7px Segoe UI';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(weekday, x, padTop + chartH + 2);
-    ctx.fillText(dayLabel, x, padTop + chartH + 12);
-    
-    if (isToday) {
-      ctx.fillStyle = '#6c5ce7';
-      ctx.font = '7px Segoe UI';
+    if (index % 3 === 0 || isToday || index === displayDates.length - 1) {
+      const dayLabel = formatShortDate(date);
+      const weekday = getWeekdayShort(date);
+      ctx.fillStyle = isToday ? '#6c5ce7' : '#5a6a85';
+      ctx.font = isToday ? 'bold 7px Segoe UI' : '7px Segoe UI';
+      ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText('● сегодня', x, padTop + chartH + 24);
+      ctx.fillText(weekday, x, padTop + chartH + 2);
+      ctx.fillText(dayLabel, x, padTop + chartH + 12);
+      
+      if (isToday) {
+        ctx.fillStyle = '#6c5ce7';
+        ctx.font = '7px Segoe UI';
+        ctx.textBaseline = 'top';
+        ctx.fillText('● сегодня', x, padTop + chartH + 24);
+      }
     }
   });
   
-  // ===== ЛИНИЯ =====
+  // Линия с градиентом (цвета в зависимости от количества задач)
   if (dataPoints.length > 1) {
     for (let i = 0; i < dataPoints.length - 1; i++) {
       const p1 = dataPoints[i];
@@ -3102,14 +3096,14 @@ async function renderWeeklyChart() {
     ctx.fill();
   }
   
-  // ===== ТОЧКИ =====
+  // Точки с цветом в зависимости от количества задач
   dataPoints.forEach(p => {
     const color = getColor(p.count);
     ctx.shadowColor = color;
     ctx.shadowBlur = p.isToday ? 14 : 6;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.isToday ? 7 : 5, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, p.isToday ? 7 : 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#0f1117';
@@ -3126,16 +3120,16 @@ async function renderWeeklyChart() {
     }
     
     if (p.count > 0) {
-      const textColor = p.count >= 5 ? '#e74c3c' : '#6c5ce7';
+      const textColor = p.count >= 5 ? '#e74c3c' : '#8bbfff';
       ctx.fillStyle = textColor;
       ctx.font = p.isToday ? 'bold 9px Segoe UI' : '8px Segoe UI';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(p.count.toString(), p.x, p.y - 10);
+      ctx.fillText(p.count.toString(), p.x, p.y - 8);
     }
   });
   
-  // ===== ПОДВАЛ =====
+  // Подвал
   const totalTasks = Object.values(dateCounts).reduce((a, b) => a + b, 0);
   const firstDate = displayDates[0];
   const lastDate = displayDates[displayDates.length - 1];
@@ -3150,7 +3144,7 @@ async function renderWeeklyChart() {
   }
   statsLabel.textContent = `● всего: ${totalTasks} задач`;
   
-  // ===== ПРОКРУТКА ДЛЯ ПК И ТЕЛЕФОНА (ОДИНАКОВАЯ) =====
+  // ===== ПРОКРУТКА =====
   if (wrapper) {
     wrapper.style.overflowX = 'auto';
     wrapper.style.overflowY = 'hidden';
@@ -3158,8 +3152,12 @@ async function renderWeeklyChart() {
     wrapper.style.scrollBehavior = 'smooth';
     wrapper.style.touchAction = 'pan-x';
     
-    // Поддержка колёсика мыши для ПК
-    wrapper.addEventListener('wheel', function(e) {
+    // Удаляем старый обработчик, чтобы не было дублей
+    const newWrapper = wrapper.cloneNode(true);
+    wrapper.parentNode.replaceChild(newWrapper, wrapper);
+    
+    // Добавляем обработчик колесика
+    newWrapper.addEventListener('wheel', function(e) {
       if (this.scrollWidth > this.clientWidth) {
         e.preventDefault();
         this.scrollLeft += e.deltaY;
@@ -3167,12 +3165,9 @@ async function renderWeeklyChart() {
     }, { passive: false });
     
     // Автопрокрутка к сегодня
-    if (!wrapper._autoscrolled) {
-      wrapper._autoscrolled = true;
-      setTimeout(() => {
-        wrapper.scrollLeft = wrapper.scrollWidth - wrapper.clientWidth;
-      }, 150);
-    }
+    setTimeout(() => {
+      newWrapper.scrollLeft = newWrapper.scrollWidth - newWrapper.clientWidth;
+    }, 150);
   }
 }
 
