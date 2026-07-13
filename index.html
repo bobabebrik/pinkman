@@ -1678,6 +1678,8 @@ let SUPABASE_URL = '';
 let SUPABASE_ANON_KEY = '';
 let TELEGRAM_BOT_TOKEN = '';
 let TELEGRAM_CHAT_ID = '';
+let cachedProblems = null; // Кэш для задач из Codeforces
+let ratingsCache = {}; // Кэш для рейтингов (восстановление при падении)
 
   // ==================== СИСТЕМА ХРАНЕНИЯ КЛЮЧЕЙ ====================
 const KEY_STORE_NAME = 'olprog_keys';
@@ -1921,6 +1923,39 @@ async function editKeys() {
   }
 }
 
+// ==================== КЭШ РЕЙТИНГОВ (ДЛЯ ВОССТАНОВЛЕНИЯ ПРИ ПАДЕНИИ) ====================
+function saveRatingToCache(taskId, rating) {
+  try {
+    const cache = JSON.parse(localStorage.getItem('ratings_cache') || '{}');
+    cache[taskId] = rating;
+    localStorage.setItem('ratings_cache', JSON.stringify(cache));
+    console.log(`💾 Рейтинг ${taskId} сохранён в временный кэш: ${rating}`);
+  } catch (e) {
+    console.warn('Ошибка сохранения кэша рейтингов:', e);
+  }
+}
+
+function getRatingFromCache(taskId) {
+  try {
+    const cache = JSON.parse(localStorage.getItem('ratings_cache') || '{}');
+    return cache[taskId] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getAllRatingsFromCache() {
+  try {
+    return JSON.parse(localStorage.getItem('ratings_cache') || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+function clearRatingsCache() {
+  localStorage.removeItem('ratings_cache');
+  console.log('🧹 Временный кэш рейтингов очищен');
+}
 
 // ==================== CODEFORCES API ====================
 
@@ -1953,36 +1988,73 @@ function parseCodeforcesUrl(url) {
   return null;
 }
 
-// Получение рейтинга задачи из Codeforces API
+// Получение рейтинга задачи из Codeforces API (с сохранением в localStorage)
 async function getCodeforcesRating(contestId, index) {
   try {
-    const url = `https://codeforces.com/api/problem.rating?contestId=${contestId}&index=${index}`;
-    const response = await fetch(url);
+    // Проверяем localStorage
+    let problems = null;
+    const cached = localStorage.getItem('cf_problems_cache');
+    const cacheTime = localStorage.getItem('cf_cache_time');
     
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    // Если кэш есть и ему меньше 7 дней
+    if (cached && cacheTime) {
+      const age = (Date.now() - parseInt(cacheTime)) / 1000;
+      if (age < 604800) { // 7 дней
+        problems = JSON.parse(cached);
+        console.log(`✅ Используем кэш из localStorage (${problems.length} задач)`);
+      }
     }
     
-    const data = await response.json();
-    
-    if (data.status === 'OK' && data.result && data.result.length > 0) {
-      // Берём первый результат (обычно он единственный)
-      return data.result[0].rating;
-    } else if (data.status === 'OK' && data.result && data.result.length === 0) {
-      // Задача существует, но рейтинг не установлен (например, новые задачи)
-      return null;
-    } else {
-      throw new Error('API вернул ошибку');
+    // Если кэша нет или он устарел - загружаем
+    if (!problems) {
+      console.log('📥 Загрузка списка задач из Codeforces...');
+      const url = `https://codeforces.com/api/problemset.problems`;
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.result && data.result.problems) {
+        problems = data.result.problems;
+        localStorage.setItem('cf_problems_cache', JSON.stringify(problems));
+        localStorage.setItem('cf_cache_time', Date.now().toString());
+        console.log(`✅ Загружено ${problems.length} задач, сохранено в кэш`);
+      } else {
+        return null;
+      }
     }
+    
+    // Ищем задачу в кэше
+    const problem = problems.find(p => 
+      p.contestId === parseInt(contestId) && 
+      p.index === index.toUpperCase()
+    );
+    
+    if (problem && problem.rating) {
+      return problem.rating;
+    }
+    return null;
   } catch (error) {
     console.warn(`Ошибка получения рейтинга ${contestId}/${index}:`, error);
     return null;
   }
 }
 
-// Обновление рейтинга задачи в базе
+// Задержка между запросами (чтобы не было 429)
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Обновление рейтинга задачи в базе (с сохранением в localStorage)
 async function updateTaskRating(taskId, rating) {
   try {
+    // 1. Сразу сохраняем в localStorage (на случай падения)
+    saveRatingToCache(taskId, rating);
+    
+    // 2. Обновляем в основной базе
     const tasks = await getTasks();
     const taskIndex = tasks.findIndex(t => t.id === taskId);
     
@@ -1993,10 +2065,10 @@ async function updateTaskRating(taskId, rating) {
     
     await saveTasks(tasks);
     
-    // Синхронизируем с облаком
+    // 3. Синхронизируем с облаком
     await syncToCloud();
     
-    console.log(`✅ Рейтинг для задачи ${taskId} обновлён: ${rating}`);
+    console.log(`✅ Рейтинг для задачи ${taskId} сохранён в базу: ${rating}`);
   } catch (error) {
     console.error('Ошибка обновления рейтинга:', error);
   }
@@ -3315,13 +3387,38 @@ async function renderSources() {
     </div>
   `).join('');
 }
+
 async function renderTasks() {
   const tasks = await getTasks();
+  
+  // === ВОССТАНОВЛЕНИЕ РЕЙТИНГОВ ИЗ ВРЕМЕННОГО КЭША ===
+  const tempCache = getAllRatingsFromCache();
+  const cachedTaskIds = Object.keys(tempCache);
+  
+  if (cachedTaskIds.length > 0) {
+    console.log(`🔄 Восстановление ${cachedTaskIds.length} рейтингов из временного кэша...`);
+    let restored = 0;
+    for (const taskId of cachedTaskIds) {
+      const task = tasks.find(t => t.id === taskId);
+      if (task && !task.rating) {
+        task.rating = tempCache[taskId];
+        restored++;
+        console.log(`♻️ Восстановлен рейтинг для ${task.name}: ${task.rating}`);
+      }
+    }
+    if (restored > 0) {
+      console.log(`✅ Восстановлено ${restored} рейтингов, сохраняем в базу...`);
+      await saveTasks(tasks);
+      // Очищаем временный кэш после успешного восстановления
+      clearRatingsCache();
+    }
+  }
+  
   const search = document.getElementById('searchInput').value.toLowerCase();
   const filter = document.getElementById('filterDifficulty').value;
   const sortBy = document.getElementById('sortBy').value;
   
-  // Сначала фильтруем
+  // Фильтрация
   let filtered = tasks.filter(t => {
     const matchSearch = !search || 
       t.name.toLowerCase().includes(search) || 
@@ -3334,7 +3431,7 @@ async function renderTasks() {
     return matchSearch && matchDiff;
   });
   
-  // Потом сортируем
+  // Сортировка
   switch(sortBy) {
     case 'newest':
       filtered.sort((a, b) => {
@@ -3367,25 +3464,6 @@ async function renderTasks() {
       filtered.sort((a, b) => (a.rating || 0) - (b.rating || 0));
       break;
   }
-  
-  // === АВТОМАТИЧЕСКОЕ ПОЛУЧЕНИЕ РЕЙТИНГА ИЗ CODEFORCES ===
-  for (const task of filtered) {
-    // Проверяем, есть ли ссылка и нет ли уже рейтинга
-    if (task.problemUrl && !task.rating) {
-      const parsed = parseCodeforcesUrl(task.problemUrl);
-      if (parsed) {
-        console.log(`🔍 Получение рейтинга для ${task.name} (${parsed.contestId}/${parsed.index})...`);
-        const rating = await getCodeforcesRating(parsed.contestId, parsed.index);
-        if (rating !== null && rating !== undefined) {
-          await updateTaskRating(task.id, rating);
-          task.rating = rating; // Обновляем в текущем массиве
-          console.log(`⭐ Рейтинг ${task.name}: ${rating}`);
-        } else {
-          console.log(`⚠️ Рейтинг для ${task.name} не найден`);
-        }
-      }
-    }
-  }
 
   const container = document.getElementById('taskList');
   const diffLabels = { easy: 'Лёгкая', medium: 'Средняя', hard: 'Сложная' };
@@ -3401,19 +3479,31 @@ async function renderTasks() {
     return; 
   }
   
-// Показываем количество найденных задач
-const countInfo = document.createElement('div');
-countInfo.style.cssText = 'font-size:0.8rem;color:var(--text-dim);margin-bottom:8px;text-align:right;';
-countInfo.textContent = `Найдено: ${filtered.length} ${getTaskWord(filtered.length)}`;
-container.appendChild(countInfo);
+  // === ОТРИСОВЫВАЕМ КАРТОЧКИ СРАЗУ (без ожидания рейтингов) ===
+  const countInfo = document.createElement('div');
+  countInfo.style.cssText = 'font-size:0.8rem;color:var(--text-dim);margin-bottom:8px;text-align:right;';
+  countInfo.textContent = `Найдено: ${filtered.length} ${getTaskWord(filtered.length)}`;
+  container.innerHTML = '';
+  container.appendChild(countInfo);
 
-  container.innerHTML = filtered.map(t => `
-    <div class="task-card" onclick="viewTask('${t.id}')">
+  container.innerHTML += filtered.map(t => {
+  // Определяем, что показывать в поле рейтинга
+  let ratingHtml = '';
+  if (t.rating) {
+    ratingHtml = `<span class="source-badge" style="background:rgba(243,156,18,0.15);color:#f39c12;border-color:rgba(243,156,18,0.3);">⭐ ${t.rating}</span>`;
+  } else if (t.problemUrl && parseCodeforcesUrl(t.problemUrl)) {
+    ratingHtml = `<span class="source-badge" id="rating-${t.id}" style="background:rgba(100,100,100,0.1);color:#888;border-color:rgba(100,100,100,0.2);">⏳ загрузка...</span>`;
+  } else {
+    ratingHtml = `<span class="source-badge" style="background:rgba(100,100,100,0.1);color:#666;border-color:rgba(100,100,100,0.2);">—</span>`;
+  }
+  
+  return `
+    <div class="task-card" id="task-${t.id}" onclick="viewTask('${t.id}')">
       <div class="task-card-header">
         <div class="task-card-title">${escapeHtml(t.name)}</div>
         <div class="task-card-meta">
           ${t.source ? `<span class="source-badge">${escapeHtml(t.source)}</span>` : ''}
-          ${t.rating ? `<span class="source-badge" style="background:rgba(243,156,18,0.15);color:#f39c12;border-color:rgba(243,156,18,0.3);">⭐ ${t.rating}</span>` : ''}
+          ${ratingHtml}
           <span class="difficulty-badge diff-${t.difficulty}">${diffIcons[t.difficulty]} ${diffLabels[t.difficulty]}</span>
         </div>
       </div>
@@ -3425,7 +3515,67 @@ container.appendChild(countInfo);
       ${t.idea ? `<div class="task-card-idea">${escapeHtml(t.idea)}</div>` : ''}
       <div class="task-card-date">🕐 ${formatDate(t.createdAt)}</div>
     </div>
-  `).join('');
+  `;
+}).join('');
+
+  // === ФОНОВАЯ ЗАГРУЗКА РЕЙТИНГОВ ===
+  // Находим задачи без рейтинга
+  const tasksWithoutRating = filtered.filter(t => t.problemUrl && !t.rating);
+  
+  if (tasksWithoutRating.length > 0) {
+    console.log(`🔄 Фоновая загрузка рейтингов для ${tasksWithoutRating.length} задач...`);
+    
+    // Загружаем рейтинги ПО ОДНОЙ, но НЕ БЛОКИРУЕМ интерфейс
+    for (let i = 0; i < tasksWithoutRating.length; i++) {
+      const task = tasksWithoutRating[i];
+      const parsed = parseCodeforcesUrl(task.problemUrl);
+      
+      if (parsed) {
+        try {
+          const rating = await getCodeforcesRating(parsed.contestId, parsed.index);
+          
+          if (rating !== null && rating !== undefined) {
+            // Сохраняем в базу
+            await updateTaskRating(task.id, rating);
+            task.rating = rating;
+            
+            // ОБНОВЛЯЕМ ТОЛЬКО ЭТУ КАРТОЧКУ (без перерисовки всех)
+            const ratingBadge = document.getElementById(`rating-${task.id}`);
+            if (ratingBadge) {
+              ratingBadge.className = 'source-badge';
+              ratingBadge.style.cssText = 'background:rgba(243,156,18,0.15);color:#f39c12;border-color:rgba(243,156,18,0.3);';
+              ratingBadge.textContent = `⭐ ${rating}`;
+            }
+            console.log(`⭐ Рейтинг ${task.name}: ${rating}`);
+          } else {
+            // Рейтинг не найден
+            const ratingBadge = document.getElementById(`rating-${task.id}`);
+            if (ratingBadge) {
+              ratingBadge.className = 'source-badge';
+              ratingBadge.style.cssText = 'background:rgba(100,100,100,0.1);color:#666;border-color:rgba(100,100,100,0.2);';
+              ratingBadge.textContent = '—';
+            }
+            console.log(`⚠️ Рейтинг для ${task.name} не найден`);
+          }
+        } catch (error) {
+          console.warn(`❌ Ошибка для ${task.name}:`, error);
+          const ratingBadge = document.getElementById(`rating-${task.id}`);
+          if (ratingBadge) {
+            ratingBadge.className = 'source-badge';
+            ratingBadge.style.cssText = 'background:rgba(231,76,92,0.15);color:#e74c5c;border-color:rgba(231,76,92,0.3);';
+            ratingBadge.textContent = '❌ ошибка';
+          }
+        }
+        
+        // Задержка 1.5 секунды между запросами
+        if (i < tasksWithoutRating.length - 1) {
+          await delay(1500);
+        }
+      }
+    }
+    
+    console.log('✅ Все рейтинги загружены!');
+  }
 }
 
 function escapeHtml(str) { 
