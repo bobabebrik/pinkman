@@ -1664,11 +1664,72 @@
       <button class="modal-close" onclick="closeModal('viewModal')">&times;</button>
     </div>
     <div id="viewContent"></div>
-    <div class="form-actions">
-      <button class="btn btn-outline" onclick="closeModal('viewModal')">Закрыть</button>
-      <button class="btn btn-outline" id="viewEditBtn">✏️ Редактировать</button>
-      <button class="btn btn-danger" id="viewDeleteBtn">🗑️ Удалить</button>
-    </div>
+    <div class="form-actions" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <button class="btn btn-outline" onclick="closeModal('viewModal')">Закрыть</button>
+    <button class="btn btn-outline" id="viewEditBtn">✏️ Редактировать</button>
+    <button class="btn btn-danger" id="viewDeleteBtn">🗑️ Удалить</button>
+  </div>
+  <button class="btn btn-copy" id="viewCopyBtn" onclick="copyTaskToClipboard()" style="
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.875rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s;
+    box-shadow: 0 2px 15px rgba(79, 172, 254, 0.4);
+    position: relative;
+    overflow: hidden;
+    min-height: 40px;
+  ">
+    <span style="position:relative;z-index:1;">✨ Спросить</span>
+    <span style="
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      font-size: 0.7rem;
+      animation: sparkle 1.5s infinite;
+    ">✨</span>
+    <span style="
+      position: absolute;
+      bottom: -2px;
+      left: 10px;
+      font-size: 0.6rem;
+      animation: sparkle 2s infinite 0.5s;
+    ">✨</span>
+    <span style="
+      position: absolute;
+      top: 30%;
+      left: 30%;
+      font-size: 0.5rem;
+      animation: sparkle 1.8s infinite 1s;
+    ">✨</span>
+  </button>
+</div>
+
+<style>
+  .btn-copy:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 4px 25px rgba(79, 172, 254, 0.6) !important;
+  }
+  .btn-copy:active {
+    transform: scale(0.95);
+  }
+  @keyframes sparkle {
+    0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+    50% { opacity: 0.2; transform: scale(1.5) rotate(180deg); }
+  }
+  .btn-copy.copied {
+    background: linear-gradient(135deg, #00b894 0%, #00cec9 100%) !important;
+    box-shadow: 0 2px 15px rgba(0, 206, 201, 0.4) !important;
+  }
+</style>
   </div>
 </div>
 
@@ -3594,6 +3655,92 @@ function formatDate(iso) {
   }); 
 }
 
+// Копирование карточки задачи в буфер обмена
+async function copyTaskToClipboard() {
+  const tasks = await getTasks();
+  const viewTitle = document.getElementById('viewTitle').textContent;
+  const task = tasks.find(t => t.name === viewTitle);
+  
+  if (!task) {
+    showNotification('❌ Задача не найдена', 'error');
+    return;
+  }
+  
+  const diffLabels = { 
+    easy: '🟢 Лёгкая', 
+    medium: '🟡 Средняя', 
+    hard: '🔴 Сложная' 
+  };
+  
+  // Формируем текст для копирования
+  let text = `📌 ЗАДАЧА: ${task.name}\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  
+  if (task.source) {
+    text += `📚 Источник: ${task.source}\n`;
+  }
+  
+  if (task.rating) {
+    text += `⭐ Рейтинг: ${task.rating}\n`;
+  }
+  
+  if (task.problemUrl) {
+    text += `🔗 Ссылка: ${task.problemUrl}\n`;
+  }
+  
+  text += `🎚️ Сложность: ${diffLabels[task.difficulty] || task.difficulty}\n`;
+  
+  if (task.tags && task.tags.length > 0) {
+    text += `🏷️ Теги: ${task.tags.join(', ')}\n`;
+  }
+  
+  text += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  
+  if (task.statement) {
+    // Убираем HTML-теги из условия
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = task.statement;
+    const cleanStatement = tempDiv.textContent || tempDiv.innerText || '';
+    text += `📄 УСЛОВИЕ:\n${cleanStatement.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  }
+  
+  if (task.idea) {
+    text += `💡 ИДЕЯ / РЕШЕНИЕ:\n${task.idea}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  }
+  
+  if (task.code) {
+    text += `💻 КОД (C++):\n\`\`\`cpp\n${task.code}\n\`\`\`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  }
+  
+  text += `📅 Создана: ${formatDate(task.createdAt)}\n`;
+  text += `📅 Обновлена: ${formatDate(task.updatedAt)}`;
+  
+  try {
+    await navigator.clipboard.writeText(text);
+    
+    // Анимация кнопки
+    const copyBtn = document.getElementById('viewCopyBtn');
+    if (copyBtn) {
+      copyBtn.classList.add('copied');
+      copyBtn.innerHTML = `<span style="position:relative;z-index:1;">✅ Скопировано!</span>`;
+      setTimeout(() => {
+        copyBtn.classList.remove('copied');
+        copyBtn.innerHTML = `
+          <span style="position:relative;z-index:1;">✨ Спросить</span>
+          <span style="position:absolute;top:-2px;right:-2px;font-size:0.7rem;animation:sparkle 1.5s infinite;">✨</span>
+          <span style="position:absolute;bottom:-2px;left:10px;font-size:0.6rem;animation:sparkle 2s infinite 0.5s;">✨</span>
+          <span style="position:absolute;top:30%;left:30%;font-size:0.5rem;animation:sparkle 1.8s infinite 1s;">✨</span>
+        `;
+      }, 2000);
+    }
+    
+    showNotification('✅ Карточка скопирована в буфер обмена!', 'success');
+  } catch (error) {
+    console.error('Ошибка копирования:', error);
+    showNotification('❌ Не удалось скопировать', 'error');
+  }
+}
+  
 async function refreshAll() {
   await renderStats();
   await renderCalendar();
