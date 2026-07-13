@@ -1921,6 +1921,88 @@ async function editKeys() {
   }
 }
 
+
+// ==================== CODEFORCES API ====================
+
+// Парсинг ссылки Codeforces
+function parseCodeforcesUrl(url) {
+  if (!url) return null;
+  
+  // Поддерживаемые форматы:
+  // https://codeforces.com/contest/1234/problem/A
+  // https://codeforces.com/problemset/problem/1234/A
+  // https://codeforces.com/contest/1234/problem/A?locale=ru
+  // codeforces.com/contest/1234/problem/A
+  
+  const patterns = [
+    /codeforces\.com\/contest\/(\d+)\/problem\/([A-Za-z0-9]+)/i,
+    /codeforces\.com\/problemset\/problem\/(\d+)\/([A-Za-z0-9]+)/i,
+    /codeforces\.com\/gym\/(\d+)\/problem\/([A-Za-z0-9]+)/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) {
+      return {
+        contestId: parseInt(match[1]),
+        index: match[2].toUpperCase()
+      };
+    }
+  }
+  
+  return null;
+}
+
+// Получение рейтинга задачи из Codeforces API
+async function getCodeforcesRating(contestId, index) {
+  try {
+    const url = `https://codeforces.com/api/problem.rating?contestId=${contestId}&index=${index}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.status === 'OK' && data.result && data.result.length > 0) {
+      // Берём первый результат (обычно он единственный)
+      return data.result[0].rating;
+    } else if (data.status === 'OK' && data.result && data.result.length === 0) {
+      // Задача существует, но рейтинг не установлен (например, новые задачи)
+      return null;
+    } else {
+      throw new Error('API вернул ошибку');
+    }
+  } catch (error) {
+    console.warn(`Ошибка получения рейтинга ${contestId}/${index}:`, error);
+    return null;
+  }
+}
+
+// Обновление рейтинга задачи в базе
+async function updateTaskRating(taskId, rating) {
+  try {
+    const tasks = await getTasks();
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+    
+    if (taskIndex === -1) return;
+    
+    tasks[taskIndex].rating = rating;
+    tasks[taskIndex].updatedAt = new Date().toISOString();
+    
+    await saveTasks(tasks);
+    
+    // Синхронизируем с облаком
+    await syncToCloud();
+    
+    console.log(`✅ Рейтинг для задачи ${taskId} обновлён: ${rating}`);
+  } catch (error) {
+    console.error('Ошибка обновления рейтинга:', error);
+  }
+}
+
+
 // ==================== INDEXEDDB ====================
 let db = null;
 
@@ -2361,22 +2443,23 @@ showNotification('🔄 Синхронизация...', 'loading');
     
     if (cloudTasks.length > 0) {
       const convertedTasks = cloudTasks.map(t => ({
-        id: t.id,
-        name: t.name,
-        difficulty: t.difficulty,
-        source: t.source || '',
-        problemUrl: t.problem_url || '',
-        tags: t.tags || [],
-        conditionImages: t.condition_images || [],
-        statement: t.statement || '',  // ← ВАЖНО: убедитесь, что эта строка есть
-        idea: t.idea || '',
-        ideaImages: t.idea_images || [],
-               code: t.code || '',
-        codeLanguage: t.code_language || 'cpp',
-        solvedDate: t.solved_date,
-        createdAt: t.created_at,
-        updatedAt: t.updated_at
-      }));
+  id: t.id,
+  name: t.name,
+  difficulty: t.difficulty,
+  source: t.source || '',
+  problemUrl: t.problem_url || '',
+  tags: t.tags || [],
+  conditionImages: t.condition_images || [],
+  statement: t.statement || '',
+  idea: t.idea || '',
+  ideaImages: t.idea_images || [],
+  code: t.code || '',
+  codeLanguage: t.code_language || 'cpp',
+  rating: t.rating || null,  // ← ЭТУ СТРОКУ ДОБАВИТЬ
+  solvedDate: t.solved_date,
+  createdAt: t.created_at,
+  updatedAt: t.updated_at
+}));
       await saveTasks(convertedTasks);
 await refreshAll(); // <-- Добавь эту строку
 statusEl.textContent = `✅ Загружено ${cloudTasks.length} задач`;
@@ -2446,21 +2529,23 @@ async function syncToCloud() {
   
   for (const task of localTasks) {
     const snakeTask = {
-      id: task.id,
-      name: task.name,
-      difficulty: task.difficulty,
-      source: task.source || null,
-      problem_url: task.problemUrl || null, // НОВОЕ
-      tags: task.tags || [],
-      condition_images: task.conditionImages || [], // НОВОЕ
-      idea: task.idea || null,
-      idea_images: task.ideaImages || [], // НОВОЕ
-            code: task.code || null,
-      solved_date: task.solvedDate,
-      created_at: task.createdAt,
-      statement: task.statement || null,
-      updated_at: task.updatedAt
-    };
+  id: task.id,
+  name: task.name,
+  difficulty: task.difficulty,
+  source: task.source || null,
+  problem_url: task.problemUrl || null,
+  tags: task.tags || [],
+  condition_images: task.conditionImages || [],
+  idea: task.idea || null,
+  idea_images: task.ideaImages || [],
+  code: task.code || null,
+  code_language: task.codeLanguage || 'cpp',
+  rating: task.rating || null,  // ← ЭТУ СТРОКУ ДОБАВИТЬ
+  solved_date: task.solvedDate,
+  created_at: task.createdAt,
+  statement: task.statement || null,
+  updated_at: task.updatedAt
+};
     
     try {
       const existing = await fetch(`${SUPABASE_URL}/rest/v1/tasks?id=eq.${task.id}&select=id`, {
@@ -3283,6 +3368,25 @@ async function renderTasks() {
       break;
   }
   
+  // === АВТОМАТИЧЕСКОЕ ПОЛУЧЕНИЕ РЕЙТИНГА ИЗ CODEFORCES ===
+  for (const task of filtered) {
+    // Проверяем, есть ли ссылка и нет ли уже рейтинга
+    if (task.problemUrl && !task.rating) {
+      const parsed = parseCodeforcesUrl(task.problemUrl);
+      if (parsed) {
+        console.log(`🔍 Получение рейтинга для ${task.name} (${parsed.contestId}/${parsed.index})...`);
+        const rating = await getCodeforcesRating(parsed.contestId, parsed.index);
+        if (rating !== null && rating !== undefined) {
+          await updateTaskRating(task.id, rating);
+          task.rating = rating; // Обновляем в текущем массиве
+          console.log(`⭐ Рейтинг ${task.name}: ${rating}`);
+        } else {
+          console.log(`⚠️ Рейтинг для ${task.name} не найден`);
+        }
+      }
+    }
+  }
+
   const container = document.getElementById('taskList');
   const diffLabels = { easy: 'Лёгкая', medium: 'Средняя', hard: 'Сложная' };
   const diffIcons = { easy: '🟢', medium: '🟡', hard: '🔴' };
